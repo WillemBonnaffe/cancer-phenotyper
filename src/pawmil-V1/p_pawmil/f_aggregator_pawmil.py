@@ -73,7 +73,7 @@ class AttentionLastAggregator(nn.Module):
         p = self.pl(x)
         o = torch.sum(a*p, dim=1)
         # o = self.link(o)
-        # p = self.link(p) # avail to produce probability instead of logits
+        # p = self.link(p) # avail to produce probability instead of logits        
         return [o, a, p] 
 
 #
