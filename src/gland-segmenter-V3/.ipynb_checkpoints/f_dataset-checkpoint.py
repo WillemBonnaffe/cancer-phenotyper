@@ -49,10 +49,26 @@ def pad_image_even(img):
 ## thresholds (numpy array): Thresholds according to which channels in the image should be split.
 ## Outputs:
 ## img_new (numpy array): Image with labelised channels.
-def labelise_channels(img, thresholds):
+def __OLD__labelise_channels(img, thresholds):
     img_new = np.zeros((img.shape[0], img.shape[1], img.shape[2]))
     for i in range(len(thresholds) - 1):
         img_new[:, :, i] = ((img[:, :, i] >= thresholds[i]) & (img[:, :, i] < thresholds[i + 1])) * i
+    img_new = np.sum(img_new, axis=2).reshape(img.shape[0], img.shape[1], 1) # Format
+    return img_new
+
+## labelise_channels
+## Goal: 
+## Labelise channels of image according to a threshold array.
+## Inputs:
+## img (numpy array): Image to split the channels of.
+## thresholds (numpy array): Thresholds according to which channels in the image should be split.
+## Outputs:
+## img_new (numpy array): Image with labelised channels.
+def labelise_channels(img, thresholds):
+    img_new = np.zeros((img.shape[0], img.shape[1], len(thresholds)-1))
+    img = img.mean(axis=2)
+    for i in range(len(thresholds) - 1):
+        img_new[:, :, i] = ((img >= thresholds[i]) & (img < thresholds[i + 1])) * i
     img_new = np.sum(img_new, axis=2).reshape(img.shape[0], img.shape[1], 1) # Format
     return img_new
 
