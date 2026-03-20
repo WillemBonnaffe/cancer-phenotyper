@@ -23,7 +23,7 @@ class InstanceEmbeddingsDataset:
     """
     Dataset class for handling instances of embeddings with optional padding and subsampling.
     """
-    def __init__(self, sample_list, labels, num_classes=1, padding=True, subsample=True, subsample_size=100):
+    def __init__(self, sample_list, labels, num_classes=1, padding=True, subsample=True, subsample_size=500):
         """
         Parameters:
         - sample_list: List of samples, where each sample contains multiple instances (each a list/array of embeddings).
