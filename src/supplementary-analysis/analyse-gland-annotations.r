@@ -68,7 +68,7 @@ barplot(tab,
         border=border_colour,
         xlab="Cluster",
         ylab="Proportion of Glands",
-        main="Cluster vs Grade")
+        main="Cluster vs Risk Category")
 
 legend("topright",
        legend=c("Low","Intermediate","High"),
