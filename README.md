@@ -38,4 +38,4 @@ The code is divided into five maine folders:
 * `multiple-instance-learning-V1`: Folder containing scripts to train multiple-instance learning models on the gland embeddings.
 * `supplementary-analysis-V0`: Folder containing scripts to analyse histopathologist annotations of selected glands.
 
-For further details see the `README.md` files in each folder.
+For further details see the jupyter notebook files in each folder.
