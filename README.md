@@ -1,6 +1,8 @@
 # CancerPhenotyper
 
-* Installs
+## Setup
+
+Run the following installs to setup the virtual environment using conda.
 
 ```bash
 conda create --name cancer-phenotyper python=3.8
