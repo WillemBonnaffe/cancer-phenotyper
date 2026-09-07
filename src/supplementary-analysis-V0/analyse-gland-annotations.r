@@ -92,7 +92,7 @@ barplot(tab,
 legend("topright",
        legend=c("3+3","3+4","4+3","4+4"),
        fill=c("green","yellow","orange","red"),
-       title="Gleason",
+       title="Approximate Gleason",
        cex=1,
        bty="n")
 

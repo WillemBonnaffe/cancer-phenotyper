@@ -23,7 +23,7 @@ class InstanceEmbeddingsDataset:
     """
     Dataset class for handling instances of embeddings with optional padding and subsampling.
     """
-    def __init__(self, sample_list, labels, num_classes=1, padding=True, subsample=True, subsample_size=500):
+    def __init__(self, sample_list, labels, num_classes=1, padding=True, subsample=True, subsample_size=1000):
         """
         Parameters:
         - sample_list: List of samples, where each sample contains multiple instances (each a list/array of embeddings).
@@ -82,6 +82,82 @@ class InstanceEmbeddingsDataset:
             sample = padded_sample
 
         return sample, label
+
+class GroupWeightedInstanceEmbeddingsDataset:
+    """
+    Dataset class for handling instances of embeddings with optional
+    padding, subsampling, and group weighting.
+    """
+    def __init__(self, sample_list, labels, groups,
+                 num_classes=1, padding=True,
+                 subsample=True, subsample_size=1000):
+
+        # Apply subsampling
+        if subsample and subsample_size is not None:
+            self.sample_list = [
+                self._subsample_instances(sample, subsample_size)
+                for sample in sample_list
+            ]
+        else:
+            self.sample_list = sample_list
+
+        self.labels = labels
+        self.groups = groups
+        self.num_classes = num_classes
+        self.padding = padding
+
+        # Count number of samples from each patient
+        group_counts = np.array([
+            np.sum(np.array(groups) == g) for g in groups
+        ])
+        # print(group_counts)
+
+        # Each patient's samples sum to a weight of 1
+        self.weights = 1 / group_counts
+
+        # Information needed for padding
+        self.max_num_instances = max(
+            len(sample) for sample in self.sample_list
+        )
+
+        self.num_embeddings = len(self.sample_list[0][0])
+
+    def _subsample_instances(self, sample, subsample_size):
+        """Randomly subsample instances from a sample."""
+
+        num_instances = len(sample)
+
+        if subsample_size < num_instances:
+            sample_indices = np.random.choice(
+                num_instances,
+                subsample_size,
+                replace=False
+            )
+            return [sample[i] for i in sample_indices]
+
+        return sample
+
+    def __len__(self):
+        return len(self.sample_list)
+
+    def __getitem__(self, index):
+        """Get a sample, its label, and its group weight."""
+
+        sample = self.sample_list[index]
+        label = self.labels[index]
+        weight = self.weights[index]
+
+        # Padding
+        if self.padding:
+            padded_sample = np.zeros(
+                (self.max_num_instances, self.num_embeddings)
+            )
+
+            num_instances = len(sample)
+            padded_sample[:num_instances, :] = sample
+            sample = padded_sample
+
+        return sample, label, weight
 
 #
 ###

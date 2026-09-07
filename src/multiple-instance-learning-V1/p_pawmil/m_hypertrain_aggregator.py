@@ -20,10 +20,14 @@ from torch.utils.data import DataLoader
 ## Import modules
 from .f_aggregator_pawmil import AttentionLastAggregator as AggregatorArchitecture
 from .f_dataset_embeds import InstanceEmbeddingsDataset
+from .f_dataset_embeds import GroupWeightedInstanceEmbeddingsDataset
 from .f_train import train_model
+from .f_train import train_model_weighted
 from .f_train import evaluate_model
-from .f_train import grouped_stratified_kfold_split
+from .f_train import evaluate_model_weighted
 from .f_train import get_auc_multilabel
+from .f_train import get_auc_multilabel_grouped
+from .f_train import grouped_stratified_kfold_split
 from .f_utils import subset_list as sl
 from .f_utils import format_label_file 
 
@@ -34,8 +38,10 @@ from .f_utils import format_label_file
 ## FUNCTIONS ##
 ###############
 
-def main(pt_embeddings_file, pt_labels_file, pt_groups_file, pt_output_folder, selected_testing_fold, device, hp_list=[]):
+def main(pt_embeddings_file, pt_labels_file, pt_groups_file, pt_output_folder, selected_testing_fold, device, hp_list=[], 
+         apply_group_weights=False, pt_weight_groups_file="", prediction_level="sample-level"):
     """
+    prediction_level: "sample-level" or "group-level" to predict for each sample or average predictions at the group level
     """
     #########################
     ## USER DEFINED INPUTS ##
@@ -73,6 +79,8 @@ def main(pt_embeddings_file, pt_labels_file, pt_groups_file, pt_output_folder, s
     labels = format_label_file(pt_labels_file)
     groups = np.genfromtxt(pt_groups_file, dtype="str")
     embeddings = pickle.load(open(pt_embeddings_file, "rb"))
+    if apply_group_weights == True:
+        weight_groups = np.genfromtxt(pt_weight_groups_file, dtype="str")
 
     ## Dependent parameters
     num_embeddings = embeddings[0].shape[1]
@@ -94,7 +102,7 @@ def main(pt_embeddings_file, pt_labels_file, pt_groups_file, pt_output_folder, s
     ## Collectors
     hypertrain_list = []
 
-    ## Hypertrain loop
+    ## For each hyperparameter combination
     for batch_size in batch_size_list:
         for num_epochs in num_epochs_list: 
             for learn_rate in learn_rate_list: 
@@ -102,7 +110,7 @@ def main(pt_embeddings_file, pt_labels_file, pt_groups_file, pt_output_folder, s
                 ## For each fold
                 for selected_training_fold in range(num_folds):
 
-                    ## For each repat
+                    ## For each repeat
                     for repeat in range(num_repeats):
 
                         ## Model id
@@ -111,41 +119,78 @@ def main(pt_embeddings_file, pt_labels_file, pt_groups_file, pt_output_folder, s
                         ## Check if checkpoint exists
                         if os.path.exists(pt_models_folder + model_id) == False:
 
-                            ## Fit
-                            model, train_loss, val_loss, test_loss = train_fold(
-                                embeddings = embeddings, 
-                                labels = labels, 
-                                groups = groups, 
-                                num_folds = num_folds, 
-                                selected_training_fold = selected_training_fold, 
-                                selected_testing_fold = selected_testing_fold, 
-                                device = device, 
-                                batch_size = batch_size, 
-                                num_epochs = num_epochs, 
-                                learn_rate = learn_rate,
-                                num_embeddings = num_embeddings,
-                                num_hidden = num_hidden
-                                )
+                            ## Standard training
+                            if apply_group_weights == False:
+                                model, train_loss, val_loss, test_loss = train_fold(
+                                    embeddings = embeddings, 
+                                    labels = labels, 
+                                    groups = groups, 
+                                    num_folds = num_folds, 
+                                    selected_training_fold = selected_training_fold, 
+                                    selected_testing_fold = selected_testing_fold, 
+                                    device = device, 
+                                    batch_size = batch_size, 
+                                    num_epochs = num_epochs, 
+                                    learn_rate = learn_rate,
+                                    num_embeddings = num_embeddings,
+                                    num_hidden = num_hidden
+                                    )
+
+                            ## Train with group weighting
+                            if apply_group_weights == True:
+                                print("group-weighted training")
+                                model, train_loss, val_loss, test_loss = train_fold_weighted(
+                                    embeddings = embeddings, 
+                                    labels = labels, 
+                                    groups = groups, 
+                                    num_folds = num_folds, 
+                                    selected_training_fold = selected_training_fold, 
+                                    selected_testing_fold = selected_testing_fold, 
+                                    device = device, 
+                                    batch_size = batch_size, 
+                                    num_epochs = num_epochs, 
+                                    learn_rate = learn_rate,
+                                    num_embeddings = num_embeddings,
+                                    num_hidden = num_hidden,
+                                    weight_groups = weight_groups
+                                    )
 
                             ## Save model
                             torch.save(model.state_dict(), pt_models_folder + model_id)
 
                         else:
 
-                            ## Evaluate
-                            model, train_loss, val_loss, test_loss = evaluate_fold(
-                                pt_aggregator_in = pt_models_folder + model_id,
-                                embeddings = embeddings, 
-                                labels = labels, 
-                                groups = groups, 
-                                num_folds = num_folds, 
-                                selected_training_fold = selected_training_fold, 
-                                selected_testing_fold = selected_testing_fold, 
-                                device = device, 
-                                batch_size = batch_size, 
-                                num_embeddings = num_embeddings,
-                                num_hidden = num_hidden
-                                )
+                            ## Evaluate at sample-level
+                            if prediction_level == "sample-level":
+                                model, train_loss, val_loss, test_loss = evaluate_fold(
+                                    pt_aggregator_in = pt_models_folder + model_id,
+                                    embeddings = embeddings, 
+                                    labels = labels, 
+                                    groups = groups, 
+                                    num_folds = num_folds, 
+                                    selected_training_fold = selected_training_fold, 
+                                    selected_testing_fold = selected_testing_fold, 
+                                    device = device, 
+                                    batch_size = batch_size, 
+                                    num_embeddings = num_embeddings,
+                                    num_hidden = num_hidden
+                                    )                        
+
+                            ## Evaluate at group-level
+                            if prediction_level == "group-level":
+                                model, train_loss, val_loss, test_loss = evaluate_fold_group_level(
+                                    pt_aggregator_in = pt_models_folder + model_id,
+                                    embeddings = embeddings, 
+                                    labels = labels, 
+                                    groups = groups, 
+                                    num_folds = num_folds, 
+                                    selected_training_fold = selected_training_fold, 
+                                    selected_testing_fold = selected_testing_fold, 
+                                    device = device, 
+                                    batch_size = batch_size, 
+                                    num_embeddings = num_embeddings,
+                                    num_hidden = num_hidden
+                                    )
 
                         ## Collect
                         hypertrain_list.append([selected_training_fold, repeat, batch_size, num_epochs, learn_rate, train_loss, val_loss, test_loss])
@@ -191,13 +236,13 @@ def train_fold(embeddings, labels, groups, num_folds, selected_training_fold, se
     ## Split data in folds
     train_labels, val_labels, test_labels = sl(sl(labels, trainval_index), train_index), sl(sl(labels, trainval_index), val_index), sl(labels, test_index)
     train_embeddings, val_embeddings, test_embeddings = sl(sl(embeddings, trainval_index), train_index), sl(sl(embeddings, trainval_index), val_index), sl(embeddings, test_index)
-
+    
     ## Create dataset
     num_classes = len(labels[0])
     train_dataset = InstanceEmbeddingsDataset(train_embeddings, train_labels, num_classes=num_classes)
     val_dataset = InstanceEmbeddingsDataset(val_embeddings, val_labels, num_classes=num_classes)
     test_dataset = InstanceEmbeddingsDataset(test_embeddings, test_labels, num_classes=num_classes)
-
+    
     ## Dataloaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -211,6 +256,11 @@ def train_fold(embeddings, labels, groups, num_folds, selected_training_fold, se
     # if os.path.exists(pt_aggregator_in):
     #     aggregator.load_state_dict(torch.load(pt_aggregator_in))
     model = aggregator
+
+    ## Sample weights
+    # group_counts = np.array([np.sum(groups == g) for g in groups])
+    # sample_weights = 1 / group_counts
+    # sample_weights = torch.tensor(sample_weights).float().to(device)
    
     ## Define the loss function and optimizer
     pos_weight = torch.tensor((1-labels).sum(0)/labels.sum(0)).float().to(device)
@@ -219,24 +269,25 @@ def train_fold(embeddings, labels, groups, num_folds, selected_training_fold, se
     ## DEBUG >>>print(f"positive weighting: {pos_weight.cpu().detach().numpy()}")
 
     ## Train the model
-    model, train_loss, val_loss = train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, echo=False)
+    model, train_loss, val_loss = train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, echo=False)    
 
     #########################
     ## EVALUATE AGGREGATOR ##
     
     ## Evaluate
-    outputs, _, _, true = evaluate_model(model, train_loader, device)
+    outputs, _, _, true = evaluate_model(model, train_loader, device)    
     auc_train = get_auc_multilabel(true, outputs)
     #
-    outputs, _, _, true = evaluate_model(model, val_loader, device)
+    outputs, _, _, true = evaluate_model(model, val_loader, device)    
     auc_val = get_auc_multilabel(true, outputs)
     #
-    outputs, _, _, true = evaluate_model(model, test_loader, device)
+    outputs, _, _, true = evaluate_model(model, test_loader, device)    
     auc_test = get_auc_multilabel(true, outputs)
 
     ## End 
-    return model, auc_train, auc_val, auc_test 
+    return model, auc_train, auc_val, auc_test
 
+    
 def evaluate_fold(pt_aggregator_in, embeddings, labels, groups, num_folds, selected_training_fold, selected_testing_fold, device, batch_size, num_embeddings, num_hidden):
     """
     """
@@ -289,6 +340,171 @@ def evaluate_fold(pt_aggregator_in, embeddings, labels, groups, num_folds, selec
 
     ## End 
     return model, auc_train, auc_val, auc_test 
+
+def train_fold_weighted(embeddings, labels, groups, num_folds, selected_training_fold, selected_testing_fold, device, batch_size, num_epochs, learn_rate, num_embeddings, num_hidden, weight_groups):
+    """
+    """
+    ###########################
+    ## PREPARE TRAINING DATA ##
+
+    ## Determine test fold indices 
+    trainval_folds, test_folds = grouped_stratified_kfold_split(labels, groups, num_folds)
+    trainval_index = trainval_folds[selected_testing_fold-1]
+    test_index = test_folds[selected_testing_fold-1]
+
+    ## Checks
+    # print(len(embeddings)) # DEBUG
+    # print(selected_testing_fold)
+    # print(trainval_index) # DEBUG
+    # print(test_index) # DEBUG
+
+    ## Determine validation fold indices
+    train_folds, val_folds = grouped_stratified_kfold_split(labels[trainval_index], groups[trainval_index], num_folds)
+    train_index = train_folds[selected_training_fold]
+    val_index = val_folds[selected_training_fold]
+
+    ## Split data in folds
+    train_labels, val_labels, test_labels = sl(sl(labels, trainval_index), train_index), sl(sl(labels, trainval_index), val_index), sl(labels, test_index)
+    train_embeddings, val_embeddings, test_embeddings = sl(sl(embeddings, trainval_index), train_index), sl(sl(embeddings, trainval_index), val_index), sl(embeddings, test_index)
+    
+    ## Create dataset
+    # num_classes = len(labels[0])
+    # train_dataset = InstanceEmbeddingsDataset(train_embeddings, train_labels, num_classes=num_classes)
+    # val_dataset = InstanceEmbeddingsDataset(val_embeddings, val_labels, num_classes=num_classes)
+    # test_dataset = InstanceEmbeddingsDataset(test_embeddings, test_labels, num_classes=num_classes)
+    
+    ## DEBUG 
+    ## and with groups...
+    train_groups = sl(sl(weight_groups, trainval_index), train_index)
+    val_groups   = sl(sl(weight_groups, trainval_index), val_index)
+    test_groups  = sl(weight_groups, test_index)
+
+    ## DEBUG
+    ## Calculate patient weight for each training sample
+    # print(train_groups)
+    # group_counts = np.array([np.sum(np.array(train_groups) == g) for g in train_groups])
+    # train_weights = torch.tensor(1 / group_counts).float()
+    # print(train_weights)
+
+    ## DEBUG 
+    ## Create dataset
+    num_classes = len(labels[0])
+    train_dataset = GroupWeightedInstanceEmbeddingsDataset(train_embeddings, train_labels, train_groups, num_classes=num_classes)
+    val_dataset = GroupWeightedInstanceEmbeddingsDataset(val_embeddings, val_labels, val_groups, num_classes=num_classes)
+    test_dataset = GroupWeightedInstanceEmbeddingsDataset(test_embeddings, test_labels, test_groups, num_classes=num_classes)
+
+    ## Dataloaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+ 
+    ######################
+    ## TRAIN AGGREGATOR ##
+
+    ## Instantiate the model
+    aggregator = AggregatorArchitecture(num_embeddings, num_classes, num_hidden)
+    # if os.path.exists(pt_aggregator_in):
+    #     aggregator.load_state_dict(torch.load(pt_aggregator_in))
+    model = aggregator
+
+    ## Sample weights
+    # group_counts = np.array([np.sum(groups == g) for g in groups])
+    # sample_weights = 1 / group_counts
+    # sample_weights = torch.tensor(sample_weights).float().to(device)
+   
+    ## Define the loss function and optimizer
+    pos_weight = torch.tensor((1-labels).sum(0)/labels.sum(0)).float().to(device)
+    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    optimizer = optim.Adam(aggregator.parameters(), lr=learn_rate)
+    ## DEBUG >>>print(f"positive weighting: {pos_weight.cpu().detach().numpy()}")
+
+    ## Train the model
+    model, train_loss, val_loss = train_model_weighted(model, train_loader, val_loader, criterion, optimizer, num_epochs, device, echo=False)    
+
+    #########################
+    ## EVALUATE AGGREGATOR ##
+    
+    ## Evaluate
+    outputs, _, _, true = evaluate_model_weighted(model, train_loader, device)
+    # auc_train = get_auc_multilabel_grouped(true, outputs, train_groups) ## DEBUG
+    auc_train = get_auc_multilabel(true, outputs)
+    #
+    outputs, _, _, true = evaluate_model_weighted(model, val_loader, device)
+    # auc_val = get_auc_multilabel_grouped(true, outputs, val_groups) ## DEBUG
+    auc_val = get_auc_multilabel(true, outputs)
+    #
+    outputs, _, _, true = evaluate_model_weighted(model, test_loader, device)
+    # auc_test = get_auc_multilabel_grouped(true, outputs, test_groups) ## DEBUG
+    auc_test = get_auc_multilabel(true, outputs)
+
+    ## End 
+    return model, auc_train, auc_val, auc_test 
+
+def evaluate_fold_group_level(pt_aggregator_in, embeddings, labels, groups, num_folds, selected_training_fold, selected_testing_fold, device, batch_size, num_embeddings, num_hidden):
+    """
+    """
+    ###########################
+    ## PREPARE TRAINING DATA ##
+
+    ## Determine test fold indices 
+    trainval_folds, test_folds = grouped_stratified_kfold_split(labels, groups, num_folds)
+    trainval_index = trainval_folds[selected_testing_fold-1]
+    test_index = test_folds[selected_testing_fold-1]
+
+    ## Determine validation fold indices
+    train_folds, val_folds = grouped_stratified_kfold_split(labels[trainval_index], groups[trainval_index], num_folds)
+    train_index = train_folds[selected_training_fold]
+    val_index = val_folds[selected_training_fold]
+
+    ## Split data in folds
+    train_labels, val_labels, test_labels = sl(sl(labels, trainval_index), train_index), sl(sl(labels, trainval_index), val_index), sl(labels, test_index)
+    train_embeddings, val_embeddings, test_embeddings = sl(sl(embeddings, trainval_index), train_index), sl(sl(embeddings, trainval_index), val_index), sl(embeddings, test_index)
+
+    ## Split groups
+    train_groups = sl(sl(groups, trainval_index), train_index)
+    val_groups   = sl(sl(groups, trainval_index), val_index)
+    test_groups  = sl(groups, test_index)
+    # print(np.unique(test_groups))
+
+    ## Split groups
+    # train_weight_groups = sl(sl(weight_groups, trainval_index), train_index)
+    # val_weight_groups   = sl(sl(weight_groups, trainval_index), val_index)
+    # test_weight_groups  = sl(weight_groups, test_index)
+    # print(np.unique(test_groups))
+ 
+    ## Create dataset
+    num_classes = len(labels[0])
+    train_dataset = InstanceEmbeddingsDataset(train_embeddings, train_labels, num_classes=num_classes)
+    val_dataset = InstanceEmbeddingsDataset(val_embeddings, val_labels, num_classes=num_classes)
+    test_dataset = InstanceEmbeddingsDataset(test_embeddings, test_labels, num_classes=num_classes)
+
+    ## Dataloaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+ 
+    #########################
+    ## EVALUATE AGGREGATOR ##
+    
+    ## Instantiate the model
+    aggregator = AggregatorArchitecture(num_embeddings, num_classes, num_hidden)
+    if os.path.exists(pt_aggregator_in):
+        aggregator.load_state_dict(torch.load(pt_aggregator_in))
+    model = aggregator
+
+    ## Evaluate
+    outputs, _, _, true = evaluate_model(model, train_loader, device)
+    auc_train = get_auc_multilabel_grouped(true, outputs, train_groups)
+    #
+    outputs, _, _, true = evaluate_model(model, val_loader, device)
+    auc_val = get_auc_multilabel_grouped(true, outputs, val_groups)
+    #
+    outputs, _, _, true = evaluate_model(model, test_loader, device)
+    auc_test = get_auc_multilabel_grouped(true, outputs, test_groups)
+
+    ## End 
+    return model, auc_train, auc_val, auc_test 
+
 
 def normalise(x):
     return (x - x.min())/(x.max() - x.min())
@@ -408,6 +624,5 @@ def get_tab_paths_best_models(pt_input_folder, selected_testing_fold):
     ## Save
     np.savetxt(pti + 'tab_paths_best_models.txt', model_paths_list, fmt="%s")
        
-
 #
 ###

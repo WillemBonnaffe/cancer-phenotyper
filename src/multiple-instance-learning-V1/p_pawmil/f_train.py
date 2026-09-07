@@ -270,6 +270,105 @@ def evaluate_model(model, dataloader, device):
     true = np.concatenate((true))
     return output_1, output_2, output_3, true
 
+def train_model_weighted(model, train_loader, val_loader, criterion, optimizer, num_epochs, device="cpu", patience=90, echo=True):
+    """
+    """
+    ## Initiate
+    model = model.to(device)
+    train_loss_trace = []
+    val_loss_trace = []
+    best_val_loss = float('inf')
+    no_improvement_count = 0
+
+    ## For each epoch
+    for epoch in range(num_epochs):
+
+        ## Train step
+        model.train()
+        train_loss = 0.0
+
+        for inputs, labels, weights in train_loader:
+            inputs = inputs.to(device, dtype=torch.float)
+            labels = labels.to(device, dtype=torch.float)
+            weights = weights.to(device, dtype=torch.float)
+
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss = (loss * weights.to(device)).mean()
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item() * inputs.size(0)
+
+        train_loss /= len(train_loader.dataset)
+
+        ## Test step
+        model.eval()
+        val_loss = 0.0
+
+        with torch.no_grad():
+            for inputs, labels, weights in val_loader:
+                inputs = inputs.to(device, dtype=torch.float)
+                labels = labels.to(device, dtype=torch.float)
+                weights = weights.to(device, dtype=torch.float)
+
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                loss = (loss * weights.to(device)).mean()
+                val_loss += loss.item() * inputs.size(0)
+
+            val_loss /= len(val_loader.dataset)
+
+        ## Update
+        if echo == True:
+            print(f"Epoch {epoch+1:03d}/{num_epochs:03d}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+        train_loss_trace.append(train_loss)
+        val_loss_trace.append(val_loss)
+
+        ## Check if the validation loss has improved
+        if val_loss < best_val_loss - 0.0001:
+            best_val_loss = val_loss
+            best_epoch = epoch
+            no_improvement_count = 0
+        else:
+            no_improvement_count += 1
+            if no_improvement_count >= patience:
+                print(f"early stop")
+                break
+
+    ## End
+    return model, train_loss_trace, val_loss_trace
+
+def evaluate_model_weighted(model, dataloader, device):
+    """
+    """
+    ## Initiate
+    model = model.to(device)
+    model.eval()
+    output_1 = []
+    output_2 = []
+    output_3 = []
+    true = []
+
+    ## Evaluate
+    with torch.no_grad():
+        for inputs, labels, weights in dataloader:
+            inputs = inputs.to(device, dtype=torch.float)
+            labels = labels.to(device, dtype=torch.float)
+            output_1_, output_2_, output_3_ = model.get_layers(inputs)
+            output_1.append(output_1_.detach().cpu().numpy())
+            output_2.append(output_2_.detach().cpu().numpy())
+            output_3.append(output_3_.detach().cpu().numpy())
+            true.append(labels.detach().cpu().numpy())
+
+    ## Format and terminate
+    output_1 = np.concatenate((output_1))
+    output_2 = np.concatenate((output_2))
+    output_3 = np.concatenate((output_3))
+    true = np.concatenate((true))
+    return output_1, output_2, output_3, true
+
 #
 ###
 
@@ -287,6 +386,40 @@ def get_auc_multilabel(y_true, y_scores):
         roc_auc += [auc(fpr, tpr)]
     return roc_auc
 
+def get_auc_multilabel_grouped(y_true, y_scores, groups):
+    """
+    Calculate group-level AUC for multilabel predictions.
+    Predictions and labels are averaged within each group.
+    """
+    groups = np.array(groups)
+
+    # Get unique groups
+    unique_groups = np.unique(groups)
+
+    # Aggregate samples to group level
+    y_true_grouped = np.array([
+        y_true[groups == group].mean(axis=0)
+        for group in unique_groups
+    ])
+
+    y_scores_grouped = np.array([
+        y_scores[groups == group].mean(axis=0)
+        for group in unique_groups
+    ])
+
+    # Calculate AUC for each label
+    roc_auc = []
+    num_labels = y_scores.shape[1]
+
+    for label_idx in range(num_labels):
+        fpr, tpr, _ = roc_curve(
+            y_true_grouped[:, label_idx],
+            y_scores_grouped[:, label_idx]
+        )
+        roc_auc.append(auc(fpr, tpr))
+
+    return roc_auc
+    
 #
 ###
 
